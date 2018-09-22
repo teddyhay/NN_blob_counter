@@ -31,11 +31,19 @@ def max_pool(x, pool_count):
 
 def dense_layer(c_in, num_in, num_out, p_count):
     num_neurons = x_len // p_count * y_len // p_count * num_in
+    print(num_neurons)
     W_fc1 = weight_variable([num_neurons, num_out])
     b_fc1 = bias_variable([num_out])
     h_pool2_flat = tf.reshape(c_in, [-1, num_neurons])
     h_fc1 = tf.nn.leaky_relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
-    return tf.nn.dropout(h_fc1, keep_prob)
+    return tf.nn.dropout(h_fc1, keep_prob), num_out
+
+
+def finalLayer(x, num_in, num_out):
+    W_fc1 = weight_variable([num_in, num_out])
+    b_fc1 = bias_variable([num_out])
+    output_neuron = tf.nn.leaky_relu(tf.matmul(x, W_fc1) + b_fc1)
+    return output_neuron
 
 
 def import_data(file_path, num_classes):
@@ -75,14 +83,15 @@ def create_data(amount, x_len):
 # fileloc = '/media/parthasarathy/Stephen Dedalus/generic_blob_images/images-counts.npz'
 x_len = 128
 y_len = 128
-num_classes = 4
+num_classes = 3
 # data, labels = import_data(fileloc, num_classes)
 # train_data, test_data, train_labels, test_labels = train_test_split(data, labels)
 
 
 num_epochs = 1000
 batch_size = 100
-l_rate = .00001
+starter_learning_rate = 0.0001
+decay_rate = 0.97
 kernels_in_first_layer = 16
 dense_layer_neuron_num = 1024
 
@@ -99,6 +108,7 @@ x = tf.placeholder(tf.float32, shape=[None, data_size])
 x_image = tf.reshape(x, [-1, x_len, y_len, 1])
 y_ = tf.placeholder(tf.float32, shape=[None, num_classes])
 keep_prob = tf.placeholder(tf.float32)
+global_step = tf.Variable(0, trainable=False)
 # Get the shape of the training data.
 
 #first layer
@@ -118,18 +128,13 @@ p4, num_out, p_count = max_pool(c4, p_count)
 
 # dense layer
 dense = dense_layer(p4, num_in, dense_layer_neuron_num, p_count)
-# dropout
-# softmax
-weight = weight_variable([dense_layer_neuron_num, num_classes])
-bias = bias_variable([num_classes])
-y_conv = tf.nn.softmax(tf.matmul(dense, weight) + bias)
+output_neuron = finalLayer(dense, num_in=int(dense_layer_neuron_num), num_out=1)
+#   loss - optimizer - evaluation
+learning_rate = tf.train.exponential_decay(starter_learning_rate, global_step,
+                                           120, decay_rate, staircase=True)
+loss = tf.losses.mean_squared_error(y_, output_neuron)
+optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss, global_step=global_step)
 
-#  TRAIN
-# num_epochs = FLAGS.num_epochs
-cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y_conv), reduction_indices=[1]))
-train_step = tf.train.AdamOptimizer(l_rate).minimize(cross_entropy)
-correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 sess.run(tf.global_variables_initializer())
 
 print(str(num_epochs) + ' epochs')
@@ -137,16 +142,16 @@ ac_list = []
 for epoch in range(num_epochs):
     batch_data, batch_labels = create_data(batch_size, x_len)
     batch_data = [np.array(i).flatten() for i in batch_data]
-    train_step.run(feed_dict={x: batch_data, y_: batch_labels, keep_prob: 0.5})
+    optimizer.run(feed_dict={x: batch_data, y_: batch_labels, keep_prob: 0.5})
     if epoch % 50 == 0:
-        print('epoch #: ' + str(epoch))
-        train_accuracy = accuracy.eval(feed_dict={
-            x: batch_data, y_: batch_labels, keep_prob: 1.0})
-        print(train_accuracy)
-    if train_accuracy == 0:
-        if np.isnan(y_conv.eval(feed_dict={x: batch_data, y_: batch_labels, keep_prob: 1.0})[0][0]):
-            print('is nan')
-    ac_list.append(train_accuracy)
+            train_loss = loss.eval(feed_dict={
+                x: batch_data, y_: batch_labels})
+            print("training loss %g" % train_loss)
+            print('learning rate = ' + str(learning_rate.eval()))
+            print('output neuron = ' + str(output_neuron.eval(feed_dict={
+                x: batch_data})[0]))
+            print('global step = ' + str(global_step.eval()))
+    ac_list.append(train_loss)
 plt.plot(ac_list)
 
 
